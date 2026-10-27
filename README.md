@@ -17,12 +17,12 @@ npm run deploy
 
 Edit [src/sources.ts](src/sources.ts) to change the upstream RPM repositories or GitHub source. RPM repository URLs can contain `$releasever` and `$basearch`; the GitHub asset pattern is a regular expression using the same placeholders. The repository supports `x86_64` and `aarch64`.
 
-Create `/etc/yum.repos.d/unified.repo`, substituting your Worker URL:
+Create `/etc/yum.repos.d/unified.repo`:
 
 ```ini
 [unified]
 name=Unified repository
-baseurl=https://YOUR-WORKER.workers.dev/repo/$releasever/$basearch/
+baseurl=https://repo.zhzy.workers.dev/repo/$releasever/$basearch/
 enabled=1
 gpgcheck=0
 ```
