@@ -1,34 +1,70 @@
 # Unified Fedora repository
 
-A Cloudflare Worker combines RPM packages from multiple sources into one DNF repository. It generates metadata on request and redirects RPM downloads to their original servers. GitHub RPM metadata is cached in Cloudflare KV; RPMs are not stored.
+One DNF repository for RPM packages from COPR, vendor repositories, and GitHub Releases. A Cloudflare Worker combines their package metadata and redirects RPM downloads to the original servers.
 
-The default sources are Ghostty and GlobalProtect-openconnect on COPR, Microsoft's VS Code and RHEL 10 repositories, Cloudflare's cloudflared repository, and the latest stable GitHub releases of Deskflow, teams-for-linux, and Clash Verge Rev.
+The public instance is available at [repo.zhzy.workers.dev](https://repo.zhzy.workers.dev/).
 
-## Run and deploy
+## Install on Fedora
 
-Requires Node.js and npm.
+Add the repository with DNF5:
+
+```sh
+sudo dnf config-manager addrepo --id=unified --set='baseurl=https://repo.zhzy.workers.dev/repo/$releasever/$basearch/' --set=gpgcheck=0
+```
+
+Refresh the metadata and look up a package:
+
+```sh
+sudo dnf makecache
+dnf repoquery --repo=unified teams-for-linux
+```
+
+Install packages normally, for example `sudo dnf install ghostty`. The repository supports `x86_64` and `aarch64`; availability depends on whether each upstream publishes a matching RPM for your architecture and Fedora release.
+
+**Signature verification:** The example sets `gpgcheck=0` for the entire unified repository because some upstream RPMs are unsigned. DNF therefore does not verify RPM signatures from this repository. To require signatures, set `gpgcheck=1` and configure the trusted upstream signing keys; unsigned packages will fail verification.
+
+## Sources
+
+| Source | Packages |
+| --- | --- |
+| [scottames/ghostty COPR](https://copr.fedorainfracloud.org/coprs/scottames/ghostty/) | Ghostty |
+| [yuezk/globalprotect-openconnect COPR](https://copr.fedorainfracloud.org/coprs/yuezk/globalprotect-openconnect/) | GlobalProtect-openconnect |
+| [Microsoft VS Code](https://packages.microsoft.com/yumrepos/vscode/) | VS Code |
+| [Microsoft RHEL 10 production](https://packages.microsoft.com/rhel/10/prod/) | Microsoft packages, including PowerShell |
+| [Cloudflare cloudflared](https://pkg.cloudflare.com/cloudflared/rpm/) | cloudflared |
+| [deskflow/deskflow](https://github.com/deskflow/deskflow/releases) | Deskflow |
+| [IsmaelMartinez/teams-for-linux](https://github.com/IsmaelMartinez/teams-for-linux/releases) | teams-for-linux |
+| [Clash-Verge-rev/clash-verge-rev](https://github.com/Clash-Verge-rev/clash-verge-rev/releases) | Clash Verge Rev |
+
+GitHub sources follow the latest stable release and select RPM assets matching the configured filename pattern. A release that has no matching Fedora-version or architecture asset contributes no package for that request.
+
+## How it works
+
+The Worker reads primary RPM metadata from each configured repository and reads RPM headers for GitHub release assets. It combines package records into one repository and serves `repomd.xml` and primary metadata for each Fedora release and architecture. Package download URLs return HTTP 302 redirects to the upstream RPMs; the Worker does not store or proxy their payloads.
+
+GitHub RPM metadata is cached in Workers KV for 30 days, keyed by the release asset's SHA-256 digest and size. The digest and size come from the GitHub release API; assets without a SHA-256 digest are not indexed. COPR and other RPM repositories already provide package metadata, so their RPM headers do not need to be fetched.
+
+The Worker fetches upstream metadata on each repository metadata request, with up to four sources processed concurrently. It generates primary metadata only; filelists and changelog metadata are not provided. A checksum in the primary metadata URL detects a change between requests; refresh DNF metadata if the upstream snapshot changes.
+
+## Develop and deploy
+
+Install Node.js and npm, then run:
 
 ```sh
 npm install
 npm run dev
 npm run typecheck
+```
+
+Edit [src/sources.ts](src/sources.ts) to configure sources. RPM repository base URLs support `$releasever` and `$basearch`. GitHub asset patterns are regular expressions with the same placeholders. After changing Worker bindings or compatibility settings, run `npm run cf-typegen` to regenerate the Workers types.
+
+For your own deployment, create a Workers KV namespace, set its ID for the `RPM_METADATA` binding in [wrangler.jsonc](wrangler.jsonc), and choose a Worker name. Authenticate with `npx wrangler login`, then deploy:
+
+```sh
+npx wrangler kv namespace create repo-github-rpm-metadata
 npm run deploy
 ```
 
-Edit [src/sources.ts](src/sources.ts) to change the upstream RPM repositories or GitHub sources. RPM repository URLs can contain `$releasever` and `$basearch`; the GitHub asset pattern is a regular expression using the same placeholders. The repository supports `x86_64` and `aarch64`.
+The included configuration targets the public instance. Change the Worker name, namespace ID, and setup URL in `src/index.ts` for a separate deployment.
 
-Create `/etc/yum.repos.d/unified.repo`:
-
-```ini
-[unified]
-name=Unified repository
-baseurl=https://repo.zhzy.workers.dev/repo/$releasever/$basearch/
-enabled=1
-gpgcheck=0
-```
-
-The Deskflow Fedora 44 RPM is unsigned, so this example disables RPM signature verification for the entire unified repository. To require signatures, set `gpgcheck=1` and configure trusted signing keys for all sources; unsigned packages will then fail verification.
-
-The generated repository currently supplies primary metadata; filelists and changelog metadata are not generated. GitHub package dependencies are read from RPM headers and cached in KV for 30 days by asset SHA-256 and size. The release API supplies the SHA-256 and size; assets without a SHA-256 digest cannot be indexed. COPR and other RPM repositories already provide package metadata, so their RPM headers are not downloaded. Metadata is regenerated for each request; its checksum detects upstream changes between requests, in which case DNF must refresh. Upstream availability, GitHub API rate limits, and Worker resource limits affect refreshes.
-
-For local testing, run `npm run dev -- --ip 0.0.0.0`, then use `http://127.0.0.1:8787/repo/44/$basearch/` from a Fedora 44 container with host networking.
+For a local Fedora 44 container test, start the Worker with `npm run dev -- --ip 0.0.0.0` and use `http://127.0.0.1:8787/repo/44/$basearch/` as the repository base URL in a Podman container running with host networking.
