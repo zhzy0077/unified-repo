@@ -141,7 +141,26 @@ async function primary(release: string, arch: string): Promise<Uint8Array> {
 }
 async function handle(request: Request): Promise<Response> {
   if (!['GET','HEAD'].includes(request.method)) return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
-  const url = new URL(request.url), match = /^\/repo\/(\d+)\/(x86_64|aarch64)\/(.*)$/.exec(url.pathname);
+  const url = new URL(request.url);
+  if (url.pathname === '/') {
+    return new Response(`Unified Fedora RPM repository
+
+To enable it, run:
+
+sudo tee /etc/yum.repos.d/unified.repo > /dev/null <<'EOF'
+[unified]
+name=Unified repository
+baseurl=https://repo.zhzy.workers.dev/repo/$releasever/$basearch/
+enabled=1
+gpgcheck=0
+EOF
+
+Then run: sudo dnf makecache
+
+gpgcheck=0 disables RPM signature verification for this repository.
+`, {headers: {'Content-Type': 'text/plain; charset=utf-8'}});
+  }
+  const match = /^\/repo\/(\d+)\/(x86_64|aarch64)\/(.*)$/.exec(url.pathname);
   if (!match) return new Response('Not found', {status:404});
   const [, release, arch, path] = match;
   if (path === 'repodata/repomd.xml' || /^repodata\/[0-9a-f]{64}-primary\.xml$/.test(path)) {
