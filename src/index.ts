@@ -147,13 +147,7 @@ async function handle(request: Request): Promise<Response> {
 
 To enable it, run:
 
-sudo tee /etc/yum.repos.d/unified.repo > /dev/null <<'EOF'
-[unified]
-name=Unified repository
-baseurl=https://repo.zhzy.workers.dev/repo/$releasever/$basearch/
-enabled=1
-gpgcheck=0
-EOF
+sudo dnf config-manager addrepo --id=unified --set='baseurl=https://repo.zhzy.workers.dev/repo/$releasever/$basearch/' --set=gpgcheck=0
 
 Then run: sudo dnf makecache
 
