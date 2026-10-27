@@ -93,7 +93,7 @@ async function readRpmPrefix(response: Response): Promise<Uint8Array> {
     return buffer.slice(0, mainEnd);
   } finally { void reader.cancel(); }
 }
-async function primary(release: string, arch: string): Promise<Uint8Array> {
+async function primary(release: string, arch: string, env: Env): Promise<Uint8Array> {
   const packages: string[] = [];
   for (const source of sources.repositories) {
     const base = repositoryBase(source, release, arch);
@@ -134,12 +134,22 @@ async function primary(release: string, arch: string): Promise<Uint8Array> {
   for (const asset of selected) {
     const href = `packages/github/${encodeURIComponent(releaseInfo.tag_name)}/${encodeURIComponent(asset.name)}`;
     if (!asset.digest || !/^sha256:[0-9a-f]{64}$/.test(asset.digest) || !Number.isSafeInteger(asset.size) || asset.size <= 0) throw new Error('GitHub asset is missing a valid SHA-256 digest or size');
-    const prefix = await readRpmPrefix(await get(asset.browser_download_url));
-    packages.push(rpmPackage(prefix, asset.digest.slice(7), href, asset.size));
+    // The cached record is independent of release URL, so identical assets can share it.
+    const key = `rpm-primary-v1:${asset.digest.slice(7)}:${asset.size}`;
+    let record: string | null = null;
+    try { record = await env.RPM_METADATA.get(key); }
+    catch (error) { console.error('KV metadata read failed', error); }
+    if (record === null) {
+      const prefix = await readRpmPrefix(await get(asset.browser_download_url));
+      record = rpmPackage(prefix, asset.digest.slice(7), '__RPM_LOCATION__', asset.size);
+      try { await env.RPM_METADATA.put(key, record, {expirationTtl: 30 * 24 * 60 * 60}); }
+      catch (error) { console.error('KV metadata write failed', error); }
+    }
+    packages.push(record.replace('href="__RPM_LOCATION__"', `href="${xml(href)}"`));
   }
   return encoder.encode(`<?xml version="1.0" encoding="UTF-8"?><metadata xmlns="http://linux.duke.edu/metadata/common" xmlns:rpm="http://linux.duke.edu/metadata/rpm" packages="${packages.length}">${packages.join('')}</metadata>`);
 }
-async function handle(request: Request): Promise<Response> {
+async function handle(request: Request, env: Env): Promise<Response> {
   if (!['GET','HEAD'].includes(request.method)) return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
   const url = new URL(request.url);
   if (url.pathname === '/') {
@@ -158,7 +168,7 @@ gpgcheck=0 disables RPM signature verification for this repository.
   if (!match) return new Response('Not found', {status:404});
   const [, release, arch, path] = match;
   if (path === 'repodata/repomd.xml' || /^repodata\/[0-9a-f]{64}-primary\.xml$/.test(path)) {
-    const data = await primary(release, arch), hash = await digest(data);
+    const data = await primary(release, arch, env), hash = await digest(data);
     if (path !== 'repodata/repomd.xml') return path === `repodata/${hash}-primary.xml` ? new Response(data as Uint8Array<ArrayBuffer>, {headers:{'Content-Type':'application/xml','Cache-Control':'no-store'}}) : new Response('Repository snapshot changed; refresh metadata', {status:404});
     const body = `<?xml version="1.0" encoding="UTF-8"?><repomd xmlns="http://linux.duke.edu/metadata/repo"><revision>${hash}</revision><data type="primary"><checksum type="sha256">${hash}</checksum><location href="repodata/${hash}-primary.xml"/><timestamp>0</timestamp><size>${data.length}</size></data></repomd>`;
     return new Response(body, {headers:{'Content-Type':'application/xml','Cache-Control':'no-store'}});
@@ -180,4 +190,4 @@ gpgcheck=0 disables RPM signature verification for this repository.
   }
   return new Response('Not found', {status:404});
 }
-export default { async fetch(request: Request): Promise<Response> { try { return await handle(request); } catch (error) { console.error(error); return new Response('Upstream repository error', {status:502}); } } } satisfies ExportedHandler<Env>;
+export default { async fetch(request: Request, env: Env): Promise<Response> { try { return await handle(request, env); } catch (error) { console.error(error); return new Response('Upstream repository error', {status:502}); } } } satisfies ExportedHandler<Env>;
