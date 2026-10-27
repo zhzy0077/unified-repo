@@ -93,9 +93,8 @@ async function readRpmPrefix(response: Response): Promise<Uint8Array> {
     return buffer.slice(0, mainEnd);
   } finally { void reader.cancel(); }
 }
-async function primary(release: string, arch: string, env: Env): Promise<Uint8Array> {
-  const packages: string[] = [];
-  for (const source of sources.repositories) {
+async function repositoryPackages(source: (typeof sources.repositories)[number], release: string, arch: string): Promise<string[]> {
+    const packages: string[] = [];
     const base = repositoryBase(source, release, arch);
     const repomd = await (await get(base + 'repodata/repomd.xml')).text();
     const primaryData = /<data\s+type="primary">([\s\S]*?)<\/data>/.exec(repomd)?.[1];
@@ -126,8 +125,10 @@ async function primary(release: string, arch: string, env: Env): Promise<Uint8Ar
       if (!rewritten) throw new Error(`Invalid package location for ${source.id}`);
       packages.push(result);
     }
-  }
-  for (const source of sources.github) {
+    return packages;
+}
+async function githubPackages(source: (typeof sources.github)[number], release: string, arch: string, env: Env): Promise<string[]> {
+    const packages: string[] = [];
     const api = `https://api.github.com/repos/${source.repository}/releases/latest`;
     const releaseInfo = await (await get(api)).json() as { tag_name: string; assets: Asset[] };
     const pattern = assetPattern(source, release, arch);
@@ -148,7 +149,24 @@ async function primary(release: string, arch: string, env: Env): Promise<Uint8Ar
       }
       packages.push(record.replace('href="__RPM_LOCATION__"', `href="${xml(href)}"`));
     }
-  }
+    return packages;
+}
+
+// Keep at most four upstream operations active while preserving configured order.
+async function primary(release: string, arch: string, env: Env): Promise<Uint8Array> {
+  const jobs: Array<() => Promise<string[]>> = [
+    ...sources.repositories.map(source => () => repositoryPackages(source, release, arch)),
+    ...sources.github.map(source => () => githubPackages(source, release, arch, env)),
+  ];
+  const results: string[][] = new Array(jobs.length);
+  let next = 0;
+  await Promise.all(Array.from({length: Math.min(4, jobs.length)}, async () => {
+    while (next < jobs.length) {
+      const index = next++;
+      results[index] = await jobs[index]();
+    }
+  }));
+  const packages = results.flat();
   return encoder.encode(`<?xml version="1.0" encoding="UTF-8"?><metadata xmlns="http://linux.duke.edu/metadata/common" xmlns:rpm="http://linux.duke.edu/metadata/rpm" packages="${packages.length}">${packages.join('')}</metadata>`);
 }
 async function handle(request: Request, env: Env): Promise<Response> {
