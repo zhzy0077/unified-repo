@@ -2,7 +2,7 @@
 
 A Cloudflare Worker combines RPM packages from multiple sources into one DNF repository. It generates metadata on request and redirects RPM downloads to their original servers. GitHub RPM metadata is cached in Cloudflare KV; RPMs are not stored.
 
-The default sources are Ghostty and GlobalProtect-openconnect on COPR, Microsoft's VS Code and RHEL 10 repositories, Cloudflare's cloudflared repository, and the latest stable Deskflow GitHub release.
+The default sources are Ghostty and GlobalProtect-openconnect on COPR, Microsoft's VS Code and RHEL 10 repositories, Cloudflare's cloudflared repository, and the latest stable GitHub releases of Deskflow, teams-for-linux, and Clash Verge Rev.
 
 ## Run and deploy
 
@@ -15,7 +15,7 @@ npm run typecheck
 npm run deploy
 ```
 
-Edit [src/sources.ts](src/sources.ts) to change the upstream RPM repositories or GitHub source. RPM repository URLs can contain `$releasever` and `$basearch`; the GitHub asset pattern is a regular expression using the same placeholders. The repository supports `x86_64` and `aarch64`.
+Edit [src/sources.ts](src/sources.ts) to change the upstream RPM repositories or GitHub sources. RPM repository URLs can contain `$releasever` and `$basearch`; the GitHub asset pattern is a regular expression using the same placeholders. The repository supports `x86_64` and `aarch64`.
 
 Create `/etc/yum.repos.d/unified.repo`:
 

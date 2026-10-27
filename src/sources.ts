@@ -7,5 +7,9 @@ export const sources = {
     { id: 'microsoft', baseUrl: 'https://packages.microsoft.com/rhel/10/prod/' },
     { id: 'cloudflared', baseUrl: 'https://pkg.cloudflare.com/cloudflared/rpm/' },
   ],
-  github: { repository: 'deskflow/deskflow', assetPattern: '^deskflow-[^-]+-fedora-$releasever-$basearch\\.rpm$' },
+  github: [
+    { id: 'deskflow', repository: 'deskflow/deskflow', assetPattern: '^deskflow-[^-]+-fedora-$releasever-$basearch\\.rpm$' },
+    { id: 'teams-for-linux', repository: 'IsmaelMartinez/teams-for-linux', assetPattern: '^teams-for-linux-.+\\.$basearch\\.rpm$' },
+    { id: 'clash-verge-rev', repository: 'Clash-Verge-rev/clash-verge-rev', assetPattern: '^Clash\\.Verge-.+\\.$basearch\\.rpm$' },
+  ],
 } as const;

@@ -12,7 +12,7 @@ async function get(url: string): Promise<Response> {
   return r;
 }
 function safePath(path: string): boolean { return !!path && !path.startsWith('/') && path.split('/').every(p => p !== '..' && p !== '.' && p !== '') && !path.includes('\\'); }
-function assetPattern(release: string, arch: string) { return new RegExp(sources.github.assetPattern.replace('$releasever', release).replace('$basearch', arch)); }
+function assetPattern(source: (typeof sources.github)[number], release: string, arch: string) { return new RegExp(source.assetPattern.replaceAll('$releasever', release).replaceAll('$basearch', arch)); }
 function repositoryBase(source: (typeof sources.repositories)[number], release: string, arch: string) {
   return source.baseUrl.replaceAll('$releasever', release).replaceAll('$basearch', arch);
 }
@@ -127,25 +127,27 @@ async function primary(release: string, arch: string, env: Env): Promise<Uint8Ar
       packages.push(result);
     }
   }
-  const api = `https://api.github.com/repos/${sources.github.repository}/releases/latest`;
-  const releaseInfo = await (await get(api)).json() as { tag_name: string; assets: Asset[] };
-  const pattern = assetPattern(release, arch);
-  const selected = releaseInfo.assets.filter(a => pattern.test(a.name));
-  for (const asset of selected) {
-    const href = `packages/github/${encodeURIComponent(releaseInfo.tag_name)}/${encodeURIComponent(asset.name)}`;
-    if (!asset.digest || !/^sha256:[0-9a-f]{64}$/.test(asset.digest) || !Number.isSafeInteger(asset.size) || asset.size <= 0) throw new Error('GitHub asset is missing a valid SHA-256 digest or size');
-    // The cached record is independent of release URL, so identical assets can share it.
-    const key = `rpm-primary-v1:${asset.digest.slice(7)}:${asset.size}`;
-    let record: string | null = null;
-    try { record = await env.RPM_METADATA.get(key); }
-    catch (error) { console.error('KV metadata read failed', error); }
-    if (record === null) {
-      const prefix = await readRpmPrefix(await get(asset.browser_download_url));
-      record = rpmPackage(prefix, asset.digest.slice(7), '__RPM_LOCATION__', asset.size);
-      try { await env.RPM_METADATA.put(key, record, {expirationTtl: 30 * 24 * 60 * 60}); }
-      catch (error) { console.error('KV metadata write failed', error); }
+  for (const source of sources.github) {
+    const api = `https://api.github.com/repos/${source.repository}/releases/latest`;
+    const releaseInfo = await (await get(api)).json() as { tag_name: string; assets: Asset[] };
+    const pattern = assetPattern(source, release, arch);
+    const selected = releaseInfo.assets.filter(a => pattern.test(a.name));
+    for (const asset of selected) {
+      const href = `packages/github/${source.id}/${encodeURIComponent(releaseInfo.tag_name)}/${encodeURIComponent(asset.name)}`;
+      if (!asset.digest || !/^sha256:[0-9a-f]{64}$/.test(asset.digest) || !Number.isSafeInteger(asset.size) || asset.size <= 0) throw new Error('GitHub asset is missing a valid SHA-256 digest or size');
+      // The cached record is independent of release URL, so identical assets can share it.
+      const key = `rpm-primary-v1:${asset.digest.slice(7)}:${asset.size}`;
+      let record: string | null = null;
+      try { record = await env.RPM_METADATA.get(key); }
+      catch (error) { console.error('KV metadata read failed', error); }
+      if (record === null) {
+        const prefix = await readRpmPrefix(await get(asset.browser_download_url));
+        record = rpmPackage(prefix, asset.digest.slice(7), '__RPM_LOCATION__', asset.size);
+        try { await env.RPM_METADATA.put(key, record, {expirationTtl: 30 * 24 * 60 * 60}); }
+        catch (error) { console.error('KV metadata write failed', error); }
+      }
+      packages.push(record.replace('href="__RPM_LOCATION__"', `href="${xml(href)}"`));
     }
-    packages.push(record.replace('href="__RPM_LOCATION__"', `href="${xml(href)}"`));
   }
   return encoder.encode(`<?xml version="1.0" encoding="UTF-8"?><metadata xmlns="http://linux.duke.edu/metadata/common" xmlns:rpm="http://linux.duke.edu/metadata/rpm" packages="${packages.length}">${packages.join('')}</metadata>`);
 }
@@ -181,11 +183,17 @@ gpgcheck=0 disables RPM signature verification for this repository.
     const encoded = relative.split('/').map(encodeURIComponent).join('/');
     return Response.redirect(repositoryBase(source, release, arch) + encoded, 302);
   }
-  const gh = /^packages\/github\/([^/]+)\/([^/]+)$/.exec(path);
-  if (gh) {
-    const tag = decodeURIComponent(gh[1]), name = decodeURIComponent(gh[2]);
-    if (!/^[\w.-]+$/.test(tag) || !assetPattern(release, arch).test(name)) return new Response('Invalid asset', {status:400});
-    const target = `https://github.com/${sources.github.repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(name)}`;
+  // Keep the original Deskflow paths working for clients with cached metadata.
+  const gh = /^packages\/github\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(path);
+  const legacyGh = /^packages\/github\/([^/]+)\/([^/]+)$/.exec(path);
+  if (gh || legacyGh) {
+    const sourceId = gh ? gh[1] : 'deskflow';
+    const source = sources.github.find(item => item.id === sourceId);
+    if (!source) return new Response('Unknown repository', {status:404});
+    const tag = decodeURIComponent(gh ? gh[2] : legacyGh![1]);
+    const name = decodeURIComponent(gh ? gh[3] : legacyGh![2]);
+    if (!/^[\w.-]+$/.test(tag) || !assetPattern(source, release, arch).test(name)) return new Response('Invalid asset', {status:400});
+    const target = `https://github.com/${source.repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(name)}`;
     return Response.redirect(target, 302);
   }
   return new Response('Not found', {status:404});
