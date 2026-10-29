@@ -181,6 +181,11 @@ async function githubPackages(source: (typeof sources.github)[number], release: 
 
 // Keep at most four upstream operations active while preserving configured order.
 async function primary(release: string, arch: string, env: Env): Promise<Uint8Array> {
+  const cacheKey = `repo-primary-v1:${release}:${arch}`;
+  try {
+    const cached = await env.RPM_METADATA.get(cacheKey, 'arrayBuffer');
+    if (cached !== null) return new Uint8Array(cached);
+  } catch (error) { console.error('KV repository snapshot read failed', error); }
   const jobs: Array<() => Promise<string[]>> = [
     ...sources.repositories.map(source => () => repositoryPackages(source, release, arch)),
     ...sources.github.map(source => () => githubPackages(source, release, arch, env)),
@@ -194,7 +199,10 @@ async function primary(release: string, arch: string, env: Env): Promise<Uint8Ar
     }
   }));
   const packages = results.flat();
-  return encoder.encode(`<?xml version="1.0" encoding="UTF-8"?><metadata xmlns="http://linux.duke.edu/metadata/common" xmlns:rpm="http://linux.duke.edu/metadata/rpm" packages="${packages.length}">${packages.join('')}</metadata>`);
+  const data = encoder.encode(`<?xml version="1.0" encoding="UTF-8"?><metadata xmlns="http://linux.duke.edu/metadata/common" xmlns:rpm="http://linux.duke.edu/metadata/rpm" packages="${packages.length}">${packages.join('')}</metadata>`);
+  try { await env.RPM_METADATA.put(cacheKey, data as Uint8Array<ArrayBuffer>, { expirationTtl: 60 * 60 }); }
+  catch (error) { console.error('KV repository snapshot write failed', error); }
+  return data;
 }
 async function handle(request: Request, env: Env): Promise<Response> {
   if (!['GET','HEAD'].includes(request.method)) return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });

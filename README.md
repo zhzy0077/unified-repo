@@ -44,7 +44,7 @@ The Worker reads primary RPM metadata from each configured repository and reads 
 
 GitHub RPM metadata is cached in Workers KV for 30 days, keyed by the release asset's SHA-256 digest and size. The digest and size come from the GitHub release API; assets without a SHA-256 digest are not indexed. COPR and other RPM repositories already provide package metadata, so their RPM headers do not need to be fetched.
 
-The Worker fetches upstream metadata on each repository metadata request, with up to four sources processed concurrently. It generates primary metadata only; filelists and changelog metadata are not provided. A checksum in the primary metadata URL detects a change between requests; refresh DNF metadata if the upstream snapshot changes.
+The combined repository metadata is cached in Workers KV for one hour per Fedora release and architecture. Both `repomd.xml` and primary metadata requests reuse this snapshot. On a cache miss, the Worker fetches upstream metadata with up to four sources processed concurrently and caches the completed result. Concurrent cache misses may each rebuild the snapshot. It generates primary metadata only; filelists and changelog metadata are not provided. A checksum in the primary metadata URL detects a change between requests; refresh DNF metadata if the upstream snapshot changes.
 
 ## Develop and deploy
 
