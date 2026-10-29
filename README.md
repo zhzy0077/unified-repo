@@ -65,6 +65,14 @@ npx wrangler kv namespace create repo-github-rpm-metadata
 npm run deploy
 ```
 
+To configure GitHub API authentication for the Worker, set a Cloudflare Workers secret:
+
+```sh
+npx wrangler secret put GITHUB_TOKEN
+```
+
+Paste your GitHub API token at the prompt. The Worker uses this secret for release lookups at `https://api.github.com`, so repository clients can use the same public URL. Authenticated requests use the token's GitHub API quota. For local development, set `GITHUB_TOKEN` in a gitignored `.dev.vars` file.
+
 The included configuration targets the public instance. Change the Worker name, namespace ID, and setup URL in `src/index.ts` for a separate deployment.
 
 For a local Fedora 44 container test, start the Worker with `npm run dev -- --ip 0.0.0.0` and use `http://127.0.0.1:8787/repo/44/$basearch/` as the repository base URL in a Podman container running with host networking.

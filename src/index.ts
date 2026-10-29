@@ -6,9 +6,36 @@ const xml = (s: unknown) => String(s ?? '').replaceAll('&', '&amp;').replaceAll(
 const unxml = (s: string) => s.replace(/&quot;|&apos;|&lt;|&gt;|&amp;/g, c => ({'&quot;':'"','&apos;':"'",'&lt;':'<','&gt;':'>','&amp;':'&'}[c]!));
 const digest = async (data: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', data as Uint8Array<ArrayBuffer>)), b => b.toString(16).padStart(2, '0')).join('');
 const headers = { 'User-Agent': 'unified-fedora-repo', 'Accept': 'application/vnd.github+json' };
-async function get(url: string): Promise<Response> {
-  const r = await fetch(url, { headers });
-  if (!r.ok) throw new Error(`Upstream returned ${r.status}: ${url}`);
+async function get(url: string, githubToken?: string): Promise<Response> {
+  const authenticated = !!githubToken && new URL(url).origin === 'https://api.github.com';
+  const requestHeaders = new Headers(headers);
+  if (authenticated) requestHeaders.set('Authorization', `Bearer ${githubToken}`);
+  const r = await fetch(url, { headers: requestHeaders, ...(authenticated ? { redirect: 'manual' as const } : {}) });
+  if (!r.ok) {
+    const responseHeaders = Object.fromEntries([...r.headers].filter(([name]) =>
+      name.startsWith('x-ratelimit-') || ['retry-after', 'x-github-request-id'].includes(name)));
+    let body = '';
+    const reader = r.body?.getReader();
+    if (reader) {
+      const decoder = new TextDecoder();
+      let remaining = 4096;
+      try {
+        while (remaining > 0) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const chunk = value.subarray(0, remaining);
+          body += decoder.decode(chunk, { stream: true });
+          remaining -= chunk.length;
+        }
+        body += decoder.decode();
+      } catch (error) {
+        body += ` [Response body read failed: ${String(error)}]`;
+      } finally { void reader.cancel().catch(() => {}); }
+    }
+    if (githubToken) body = body.replaceAll(githubToken, '[REDACTED]');
+    console.error('Upstream request failed', { url, status: r.status, headers: responseHeaders, body });
+    throw new Error(`Upstream returned ${r.status}: ${url}`);
+  }
   return r;
 }
 function safePath(path: string): boolean { return !!path && !path.startsWith('/') && path.split('/').every(p => p !== '..' && p !== '.' && p !== '') && !path.includes('\\'); }
@@ -130,7 +157,7 @@ async function repositoryPackages(source: (typeof sources.repositories)[number],
 async function githubPackages(source: (typeof sources.github)[number], release: string, arch: string, env: Env): Promise<string[]> {
     const packages: string[] = [];
     const api = `https://api.github.com/repos/${source.repository}/releases/latest`;
-    const releaseInfo = await (await get(api)).json() as { tag_name: string; assets: Asset[] };
+    const releaseInfo = await (await get(api, env.GITHUB_TOKEN)).json() as { tag_name: string; assets: Asset[] };
     const pattern = assetPattern(source, release, arch);
     const selected = releaseInfo.assets.filter(a => pattern.test(a.name));
     for (const asset of selected) {
