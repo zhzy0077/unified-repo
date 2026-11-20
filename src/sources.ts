@@ -11,5 +11,6 @@ export const sources = {
     { id: 'deskflow', repository: 'deskflow/deskflow', assetPattern: '^deskflow-[^-]+-fedora-$releasever-$basearch\\.rpm$' },
     { id: 'teams-for-linux', repository: 'IsmaelMartinez/teams-for-linux', assetPattern: '^teams-for-linux-.+\\.$basearch\\.rpm$' },
     { id: 'clash-verge-rev', repository: 'Clash-Verge-rev/clash-verge-rev', assetPattern: '^Clash\\.Verge-.+\\.$basearch\\.rpm$' },
+    { id: 'bitwarden', repository: 'bitwarden/clients', assetPattern: '^bit-Bitwarden-.+-$basearch\\.rpm$' },
   ],
 } as const;

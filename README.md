@@ -35,6 +35,7 @@ Install packages normally, for example `sudo dnf install ghostty`. The repositor
 | [deskflow/deskflow](https://github.com/deskflow/deskflow/releases) | Deskflow |
 | [IsmaelMartinez/teams-for-linux](https://github.com/IsmaelMartinez/teams-for-linux/releases) | teams-for-linux |
 | [Clash-Verge-rev/clash-verge-rev](https://github.com/Clash-Verge-rev/clash-verge-rev/releases) | Clash Verge Rev |
+| [bitwarden/clients](https://github.com/bitwarden/clients/releases) | Bitwarden |
 
 GitHub sources follow the latest stable release and select RPM assets matching the configured filename pattern. A release that has no matching Fedora-version or architecture asset contributes no package for that request.
 
